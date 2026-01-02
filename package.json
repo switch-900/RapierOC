@@ -1,0 +1,25 @@
+{
+  "name": "rapier-inscribe",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bundle-rapier-runtime-modular.js",
+  "scripts": {
+    "build": "npm run -s build:modular",
+    "build:modular": "node ./bundle-rapier-runtime-modular.js",
+    "clean": "rm -rf ./inscriptions",
+    "verify": "node ./verify-inscriptions.js",
+    "verify:determinism": "node ./verify-inscriptions.js --rebuild-and-compare",
+    "test": "echo \"No tests\" && exit 0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.2",
+    "@react-three/rapier": "^2.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11"
+  }
+}
