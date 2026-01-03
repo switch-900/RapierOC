@@ -52,6 +52,20 @@ want caching, call:
 
 `loadRapierRuntime({ cache: true })`
 
+## Optional: "normal" named imports (Vite-template friendly)
+
+If you want app code to look like the upstream examples:
+
+`import { Physics, RigidBody, CuboidCollider } from 'rapier-runtime'`
+
+…use the provided facade template [rapier-named-exports.template.mjs](rapier-named-exports.template.mjs).
+
+How to use it in your app:
+- Inscribe `rapier-runtime-loader.js` and add it to your app import-map as `rapier-runtime-loader`.
+- Copy `rapier-named-exports.template.mjs` into your app (rename to e.g. `rapier-runtime.mjs`), fill in the part lists, inscribe it, and map `rapier-runtime` to it.
+
+This keeps the robust runtime loader (WASM init + chunk ordering + iframe-safe defaults) while allowing normal named imports.
+
 Recommended: configure the loader with SAT numbers so it always fetches the
 latest inscription sitting on that sat via:
 
