@@ -10,6 +10,14 @@
 
 const DEFAULT_DB = 'rapier-runtime-cache-v1';
 
+function hasIndexedDB() {
+  try {
+    return typeof indexedDB !== 'undefined' && indexedDB != null;
+  } catch {
+    return false;
+  }
+}
+
 function requireDecompressionStream() {
   if (typeof DecompressionStream === 'undefined') {
     throw new Error(
@@ -19,8 +27,41 @@ function requireDecompressionStream() {
   }
 }
 
+function sliceArrayBuffer(view) {
+  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+}
+
+function looksLikeWasm(u8) {
+  return (
+    u8.byteLength >= 4 &&
+    u8[0] === 0x00 &&
+    u8[1] === 0x61 &&
+    u8[2] === 0x73 &&
+    u8[3] === 0x6d
+  );
+}
+
+function looksLikeUtf8Js(u8) {
+  // Heuristic: first ~64 bytes are typical JS ASCII (no NULs).
+  // This is only used to decide whether we can proceed without Brotli.
+  const n = Math.min(64, u8.byteLength);
+  if (n === 0) return false;
+  for (let i = 0; i < n; i++) {
+    const c = u8[i];
+    if (c === 0x00) return false;
+    // allow: tab/newline/carriage return and printable ASCII
+    const ok = c === 0x09 || c === 0x0a || c === 0x0d || (c >= 0x20 && c <= 0x7e);
+    if (!ok) return false;
+  }
+  return true;
+}
+
 async function openDB(dbName = DEFAULT_DB) {
   return new Promise((resolve, reject) => {
+    if (!hasIndexedDB()) {
+      reject(new Error('IndexedDB unavailable'));
+      return;
+    }
     const req = indexedDB.open(dbName, 1);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -39,6 +80,22 @@ async function idbGet(key, dbName = DEFAULT_DB) {
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
+}
+
+async function safeIdbGet(key, dbName) {
+  try {
+    return await idbGet(key, dbName);
+  } catch {
+    return null;
+  }
+}
+
+async function safeIdbSet(key, value, dbName) {
+  try {
+    await idbSet(key, value, dbName);
+  } catch {
+    // Best-effort cache: ignore (common in iframes / privacy contexts)
+  }
 }
 
 async function idbSet(key, value, dbName = DEFAULT_DB) {
@@ -97,6 +154,31 @@ async function brotliDecompress(brBytes) {
   return ab;
 }
 
+async function maybeBrotliDecompress(bytes, kind) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+
+  // If Brotli isn't available, proceed only if the data already looks decoded.
+  if (typeof DecompressionStream === 'undefined') {
+    const decodedOk =
+      kind === 'wasm' ? looksLikeWasm(u8) : kind === 'js' ? looksLikeUtf8Js(u8) : false;
+
+    if (!decodedOk) {
+      throw new Error(
+        'DecompressionStream("br") not available, and fetched bytes do not look already-decompressed. '
+      );
+    }
+
+    return sliceArrayBuffer(u8);
+  }
+
+  // Try Brotli-decompress first; if it fails, assume server already decoded it.
+  try {
+    return await brotliDecompress(u8);
+  } catch {
+    return sliceArrayBuffer(u8);
+  }
+}
+
 async function importModuleFromBytes(jsBytes) {
   const blobUrl = URL.createObjectURL(
     new Blob([jsBytes], { type: 'text/javascript' })
@@ -125,7 +207,9 @@ export const REACT_THREE_RAPIER_JS_PART_SATS = [
 
 export async function loadRapierRuntime(options = {}) {
   const {
-    cache = true,
+    // Default OFF: IndexedDB is often blocked in iframes / privacy contexts.
+    // Opt-in with { cache: true } when you control the top-level environment.
+    cache = false,
     dbName = DEFAULT_DB,
     wasmKey = 'wasm:rapier.wasm',
     compatKey = 'js:rapier3d-compat',
@@ -139,18 +223,20 @@ export async function loadRapierRuntime(options = {}) {
   if (!compatParts.length) throw new Error('No compat JS parts configured');
   if (!wrapperParts.length) throw new Error('No @react-three/rapier parts configured');
 
-  let wasmAb = cache ? await idbGet(wasmKey, dbName) : null;
+  const canCache = !!cache;
+
+  let wasmAb = canCache ? await safeIdbGet(wasmKey, dbName) : null;
   if (!wasmAb) {
     const br = await fetchConcat(wasmParts);
-    wasmAb = await brotliDecompress(br);
-    if (cache) await idbSet(wasmKey, wasmAb, dbName);
+    wasmAb = await maybeBrotliDecompress(br, 'wasm');
+    if (canCache) await safeIdbSet(wasmKey, wasmAb, dbName);
   }
 
-  let compatJsAb = cache ? await idbGet(compatKey, dbName) : null;
+  let compatJsAb = canCache ? await safeIdbGet(compatKey, dbName) : null;
   if (!compatJsAb) {
     const br = await fetchConcat(compatParts);
-    compatJsAb = await brotliDecompress(br);
-    if (cache) await idbSet(compatKey, compatJsAb, dbName);
+    compatJsAb = await maybeBrotliDecompress(br, 'js');
+    if (canCache) await safeIdbSet(compatKey, compatJsAb, dbName);
   }
 
   const compatMod = await importModuleFromBytes(new Uint8Array(compatJsAb));
@@ -169,11 +255,11 @@ export async function loadRapierRuntime(options = {}) {
   }
   await init(wasmAb);
 
-  let wrapperJsAb = cache ? await idbGet(wrapperKey, dbName) : null;
+  let wrapperJsAb = canCache ? await safeIdbGet(wrapperKey, dbName) : null;
   if (!wrapperJsAb) {
     const br = await fetchConcat(wrapperParts);
-    wrapperJsAb = await brotliDecompress(br);
-    if (cache) await idbSet(wrapperKey, wrapperJsAb, dbName);
+    wrapperJsAb = await maybeBrotliDecompress(br, 'js');
+    if (canCache) await safeIdbSet(wrapperKey, wrapperJsAb, dbName);
   }
 
   const wrapperMod = await importModuleFromBytes(new Uint8Array(wrapperJsAb));

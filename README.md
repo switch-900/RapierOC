@@ -34,6 +34,10 @@ This is the lowest long-term cost approach:
 - `@react-three/fiber`
 - `BufferGeometryUtils`
 
+Version note:
+- If your inscribed app is `react@18` and `@react-three/fiber@8`, use `@react-three/rapier@1.x`.
+- `@react-three/rapier@2.x` targets newer majors (React 19 / R3F 9).
+
 ## Loader
 
 After you inscribe the parts, fill in the sat-number lists in:
@@ -41,6 +45,12 @@ After you inscribe the parts, fill in the sat-number lists in:
 
 Then call:
 - `loadRapierRuntime()`
+
+By default, the loader does **not** use IndexedDB caching (this is more reliable
+in iframes / privacy-restricted contexts). If you control the top-level page and
+want caching, call:
+
+`loadRapierRuntime({ cache: true })`
 
 Recommended: configure the loader with SAT numbers so it always fetches the
 latest inscription sitting on that sat via:
@@ -55,6 +65,10 @@ Your tooling may infer encoding from the filename.
 - Recommended inscription fields for these `.br` files:
   - `content-type`: `application/octet-stream`
   - `encoding`: leave empty / none (do **not** mark them as `br`), because the loader fetches bytes and manually decompresses.
+
+If your host (e.g. ordinals.com) serves the bytes already decompressed (via a decode path
+or `Content-Encoding: br` handling), the loader will also work: it tries Brotli-decompress
+first and falls back to treating the response as already-decoded.
 
 ## Notes
 
