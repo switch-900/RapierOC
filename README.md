@@ -1,4 +1,4 @@
-# Rapier Inscribe (Best Option: Modular Runtime)
+# RapierOC
 
 This repo produces inscription-ready, Brotli-compressed + chunked Rapier artifacts **without bundling React/Three**, intended for reuse across multiple inscriptions.
 
@@ -74,3 +74,4 @@ first and falls back to treating the response as already-decoded.
 
 - Best practice is **compress then split** (this repo does that for mainnet).
 - Set `KEEP_LEGAL=1` to keep license comments in bundled JS outputs.
+
