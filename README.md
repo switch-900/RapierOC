@@ -1,91 +1,66 @@
-# RapierOC
+# On‑Chain Rapier Runtime (for R3F)
 
-This repo produces inscription-ready, Brotli-compressed + chunked Rapier artifacts **without bundling React/Three**, intended for reuse across multiple inscriptions.
+It provides pointers and usage notes for an on‑chain ESM loader that exposes the `@react-three/rapier` API via a single import specifier: `rapier-runtime`.
 
-## Recommended build
+## Loader (stable sat URL)
 
-```bash
-npm install
-npm run clean
-npm run build
+- `rapier-runtime` → https://ordinals.com/r/sat/479489914976493/at/-1/content
 
-# Optional (recommended): verify the generated artifacts are reassemblable + decompress correctly
-npm run verify
+## How to use (importmap)
 
-# Optional: check build determinism (rebuild and ensure byte-for-byte identical)
-npm run verify:determinism
+Add to your page importmap:
+
+```json
+{
+  "imports": {
+    "rapier-runtime": "/r/sat/479489914976493/at/-1/content"
+  }
+}
 ```
 
-Output:
-- `inscriptions/rapier-runtime/`
-  - `wasm/aa.rapier.wasm.br`, `wasm/ab.rapier.wasm.br`, ...
-  - `js/aa.rapier3d-compat.js.br`, `js/ab.rapier3d-compat.js.br`, ...
-  - `js/react-three-rapier.js.br`
-  - `INSCRIPTION-REPORT.txt`
+Then import normally:
 
-This is the lowest long-term cost approach:
-- You inscribe the heavier runtime pieces once (WASM + compat glue)
-- Future apps can reuse them and only inscribe small wrappers as needed
+```js
+import { Physics, RigidBody, CuboidCollider, useRapier } from 'rapier-runtime';
+```
 
-## Runtime requirements (must be in your on-chain import map)
+## What Rapier is good for
 
-- `react`
-- `three`
-- `@react-three/fiber`
-- `BufferGeometryUtils`
+Rapier is a fast real-time rigid-body physics engine. In an R3F/Three.js app it’s commonly used for:
 
-Version note:
-- If your inscribed app is `react@18` and `@react-three/fiber@8`, use `@react-three/rapier@1.x`.
-- `@react-three/rapier@2.x` targets newer majors (React 19 / R3F 9).
+- Physics simulation: gravity + collisions + contacts
+- Interactive objects: stacking, pushing, constraints/joints
+- Gameplay queries: raycasts / shape casts / intersection tests
+- Character movement: kinematic character controllers (walking, sliding, steps)
 
-## Loader
+In short: if you want your 3D scene to behave like a world (and not just visuals), Rapier is the core simulation layer.
 
-After you inscribe the parts, fill in the sat-number lists in:
-- `rapier-runtime-loader.js` (`RAPiER_WASM_PART_SATS`, `RAPIER_COMPAT_JS_PART_SATS`, `REACT_THREE_RAPIER_JS_PART_SATS`)
+## Required companion imports (React / Three / R3F)
 
-Then call:
-- `loadRapierRuntime()`
+The loader should be used in conjunction with your existing on‑chain React + Three.js + R3F importmap entries.
 
-By default, the loader does **not** use IndexedDB caching (this is more reliable
-in iframes / privacy-restricted contexts). If you control the top-level page and
-want caching, call:
+Common pointers (as used in this workspace):
+- React: https://ordinals.com/content/609b117277f1e9c9f27f358fe02db34e13d08915bbcea18770dc36f5f3afcbb2i0
+- React DOM: https://ordinals.com/content/609b117277f1e9c9f27f358fe02db34e13d08915bbcea18770dc36f5f3afcbb2i1
+- React DOM Client: https://ordinals.com/content/4d9308ce08bed11c028acb3d1dd964ea0e9809f51daf141ca0760e745a8070aei0
+- JSX runtime: https://ordinals.com/content/609bad601cdafa4d4a2622bbd9f4ebfdd278b8c5ea1efeb0d468db33f871fffai1
+- Three.js: https://ordinals.com/content/0d013bb60fc5bf5a6c77da7371b07dc162ebc7d7f3af0ff3bd00ae5f0c546445i0
+- @react-three/fiber: https://ordinals.com/content/f1be1caad667af0ec844d1333ad4d38f2cd7cc2855404bba11ac436b53c799b6i0
+- BufferGeometryUtils: https://ordinals.com/content/3d3dc321b6541bcb8ca0b3066697b6df55b36b1dcbf19dcde8a53650bebca125i0
 
-`loadRapierRuntime({ cache: true })`
+## Exports (overview)
 
-## Optional: "normal" named imports (Vite-template friendly)
+The loader re-exports the public `@react-three/rapier` API, including:
+- Components: `Physics`, `RigidBody`, colliders (cuboid/ball/capsule/etc)
+- Hooks: `useRapier`, `useBeforePhysicsStep`, `useAfterPhysicsStep`, joint hooks
+- Utils: `vec3`, `quat`, `euler`, `interactionGroups`
+- Extras: `rapier`, `compat`, `r3rapier` (raw modules)
 
-If you want app code to look like the upstream examples:
+### Controllers and other “engine-level” APIs
 
-`import { Physics, RigidBody, CuboidCollider } from 'rapier-runtime'`
+The `@react-three/rapier` wrapper focuses on R3F-friendly components/hooks. For lower-level Rapier features (e.g. character controllers, direct world queries, or manual rigid-body/collider construction), use the extra exports:
 
-…use the provided facade template [rapier-named-exports.template.mjs](rapier-named-exports.template.mjs).
+- `rapier` (engine API)
+- `compat` (same engine module)
 
-How to use it in your app:
-- Inscribe `rapier-runtime-loader.js` and add it to your app import-map as `rapier-runtime-loader`.
-- Copy `rapier-named-exports.template.mjs` into your app (rename to e.g. `rapier-runtime.mjs`), fill in the part lists, inscribe it, and map `rapier-runtime` to it.
-
-This keeps the robust runtime loader (WASM init + chunk ordering + iframe-safe defaults) while allowing normal named imports.
-
-Recommended: configure the loader with SAT numbers so it always fetches the
-latest inscription sitting on that sat via:
-
-`/r/sat/{sat}/at/-1`
-
-## Inscription fields (important)
-
-Your tooling may infer encoding from the filename.
-
-- All chunk files are named to **end with `.br`** so tools can detect Brotli.
-- Recommended inscription fields for these `.br` files:
-  - `content-type`: `application/octet-stream`
-  - `encoding`: leave empty / none (do **not** mark them as `br`), because the loader fetches bytes and manually decompresses.
-
-If your host (e.g. ordinals.com) serves the bytes already decompressed (via a decode path
-or `Content-Encoding: br` handling), the loader will also work: it tries Brotli-decompress
-first and falls back to treating the response as already-decoded.
-
-## Notes
-
-- Best practice is **compress then split** (this repo does that for mainnet).
-- Set `KEEP_LEGAL=1` to keep license comments in bundled JS outputs.
-
+That’s where you’ll typically find things like `World`, `RigidBodyDesc`, `ColliderDesc`, query helpers, and (depending on Rapier build/version) character controller types.
